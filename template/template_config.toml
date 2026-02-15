@@ -5,7 +5,7 @@ version = "0.1.0" # 配置模板版本
 token = ""                                      # Telegram Bot Token（必填）
 api_base = "https://api.telegram.org"           # API 基础地址
 poll_timeout = 20                               # getUpdates 超时（秒）
-allowed_updates = ["message", "edited_message"]
+allowed_updates = ["message"]
 proxy_enabled = false                           # 是否启用代理
 proxy_url = ""                                  # 代理地址，例如：socks5://127.0.0.1:1080 或 http://127.0.0.1:7890
 proxy_from_env = false                          # 是否从环境变量读取代理（HTTP(S)_PROXY/NO_PROXY）
@@ -13,7 +13,7 @@ proxy_from_env = false                          # 是否从环境变量读取代
 [maibot_server]
 # 与 MaiBot Core 的 ws 连接设置（示例：ws://<host>:<port>/ws）
 host = "localhost"
-port = 8000
+port = 8040
 
 [chat]
 group_list_type = "whitelist"   # whitelist/blacklist
