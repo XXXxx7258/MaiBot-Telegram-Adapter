@@ -25,8 +25,15 @@ async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
                 logger.warning(f"getUpdates失败: {resp}")
                 await asyncio.sleep(1)
                 continue
-            for upd in resp.get("result", []):
-                offset = upd.get("update_id", 0) + 1
+            updates = resp.get("result", [])
+            # Telegram 默认按 update_id 递增返回，但这里按 max() 推进 offset，避免极端情况下回退导致重复拉取。
+            try:
+                max_uid = max(int(u.get("update_id")) for u in updates if u.get("update_id") is not None)
+                next_offset = max_uid + 1
+                offset = next_offset if offset is None else max(offset, next_offset)
+            except Exception:
+                pass
+            for upd in updates:
                 await handler.handle_update(upd)
         except asyncio.CancelledError:
             raise
