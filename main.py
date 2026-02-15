@@ -25,20 +25,33 @@ async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
                 logger.warning(f"getUpdates失败: {resp}")
                 await asyncio.sleep(1)
                 continue
-            updates = resp.get("result", [])
-            # Telegram 默认按 update_id 递增返回，但这里按 max() 推进 offset，避免极端情况下回退导致重复拉取。
-            try:
-                max_uid = max(int(u.get("update_id")) for u in updates if u.get("update_id") is not None)
-                next_offset = max_uid + 1
-                offset = next_offset if offset is None else max(offset, next_offset)
-            except Exception:
-                pass
+            updates = resp.get("result") or []
             for upd in updates:
-                await handler.handle_update(upd)
+                uid_raw = upd.get("update_id")
+                if uid_raw is None:
+                    logger.warning(f"忽略缺少 update_id 的 update: {upd}")
+                    continue
+                try:
+                    uid = int(uid_raw)
+                except (TypeError, ValueError):
+                    logger.warning(f"忽略非法 update_id={uid_raw!r} 的 update: {upd}")
+                    continue
+
+                try:
+                    await handler.handle_update(upd)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # 避免异常导致 offset 不推进而重复拉取同一 update（上游可能因此判定刷屏）
+                    logger.exception(f"处理 update_id={uid} 时异常")
+
+                # Telegram 默认按 update_id 递增返回；这里保证 offset 单调推进，避免极端情况下回退导致重复拉取。
+                next_offset = uid + 1
+                offset = next_offset if offset is None else max(offset, next_offset)
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.error(f"轮询异常: {e}")
+            logger.exception(f"轮询异常: {e}")
             await asyncio.sleep(2)
 
 
