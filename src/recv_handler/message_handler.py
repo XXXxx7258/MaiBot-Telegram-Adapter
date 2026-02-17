@@ -13,7 +13,6 @@ from maim_message import (
 
 from ..logger import logger
 from ..config import global_config
-from ..runtime_state import telegram_runtime_state
 from ..utils import SlidingWindowDeduper, to_base64, is_group_chat, pick_username
 from ..telegram_client import TelegramClient
 from .message_sending import message_send_instance
@@ -104,8 +103,6 @@ class TelegramUpdateHandler:
             logger.debug(f"跳过重复消息: chat_id={chat_id}, message_id={message_id}")
             return
 
-        telegram_runtime_state.record_message(chat_id=chat_id, message_id=message_id, chat_type=chat_type)
-
         is_from_bot = self.bot_id is not None and user_id == self.bot_id
 
         if not await self.check_allow_to_chat(user_id, chat_id, chat_type):
@@ -137,9 +134,6 @@ class TelegramUpdateHandler:
         if not seg_list:
             logger.warning("处理后消息内容为空")
             return
-        if not is_group_chat(chat_type):
-            # 记录私聊 chat_id，便于下游在 user_info 指向 bot 自身时回退到正确目标。
-            additional_config.setdefault("chat_id", chat_id)
         if is_from_bot:
             # 不拦截 bot 自发消息；但打标供上游（如需要）区分，避免业务侧误触发循环。
             additional_config["from_bot"] = True
