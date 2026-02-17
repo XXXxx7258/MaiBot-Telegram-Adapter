@@ -8,6 +8,7 @@ from src.telegram_client import TelegramClient
 from src.mmc_com_layer import mmc_start_com, mmc_stop_com, router
 from src.recv_handler.message_sending import message_send_instance
 from src.recv_handler.message_handler import TelegramUpdateHandler
+from src.runtime_state import telegram_runtime_state
 from src.send_handler.tg_sending import TGMessageSender
 from src.utils import SlidingWindowDeduper
 import src.send_handler.tg_sending as tg_sending
@@ -82,6 +83,7 @@ async def main() -> None:
             bot_username = me["result"].get("username")
             if bot_id:
                 handler.set_self(bot_id, bot_username)
+                telegram_runtime_state.set_bot_id(int(bot_id))
                 logger.info(f"Telegram Self: id={bot_id}, username={bot_username}")
         else:
             logger.warning(f"getMe 失败: {me}")
