@@ -123,7 +123,7 @@ class SendHandler:
 
         fallback_user_id_int = self._to_int_or_none(fallback_user_id)
         bot_id = telegram_runtime_state.bot_id
-        if fallback_user_id_int is not None and fallback_user_id_int == bot_id:
+        if fallback_user_id_int is not None and bot_id is not None and fallback_user_id_int == bot_id:
             if reply_to is not None:
                 mapped_chat_id = telegram_runtime_state.get_chat_id_by_message_id(reply_to)
                 if mapped_chat_id is not None:
