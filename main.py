@@ -1,6 +1,5 @@
 import asyncio
 import signal
-from collections import deque
 from typing import Optional
 
 from src.logger import logger
@@ -10,17 +9,18 @@ from src.mmc_com_layer import mmc_start_com, mmc_stop_com, router
 from src.recv_handler.message_sending import message_send_instance
 from src.recv_handler.message_handler import TelegramUpdateHandler
 from src.send_handler.tg_sending import TGMessageSender
+from src.utils import SlidingWindowDeduper
 import src.send_handler.tg_sending as tg_sending
 
 
 async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
     tg = handler.tg
     offset: Optional[int] = None
-    timeout = global_config.telegram_bot.poll_timeout
-    allowed = global_config.telegram_bot.allowed_updates
-    seen_update_ids: deque[int] = deque()
-    seen_update_set: set[int] = set()
-    dedup_window = 4096
+    tg_cfg = global_config.telegram_bot
+    timeout = tg_cfg.poll_timeout
+    allowed = tg_cfg.allowed_updates
+    dedup_window = tg_cfg.update_dedup_window if tg_cfg.update_dedup_window > 0 else tg_cfg.dedup_window
+    seen_update_deduper = SlidingWindowDeduper[int](dedup_window)
     logger.info("启动 Telegram 轮询...")
     while True:
         try:
@@ -45,15 +45,9 @@ async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
                 next_offset = uid + 1
                 offset = next_offset if offset is None else max(offset, next_offset)
 
-                if uid in seen_update_set:
+                if seen_update_deduper.seen_or_add(uid):
                     logger.debug(f"跳过重复 update_id={uid}")
                     continue
-
-                seen_update_set.add(uid)
-                seen_update_ids.append(uid)
-                if len(seen_update_ids) > dedup_window:
-                    old_uid = seen_update_ids.popleft()
-                    seen_update_set.discard(old_uid)
 
                 try:
                     await handler.handle_update(upd)

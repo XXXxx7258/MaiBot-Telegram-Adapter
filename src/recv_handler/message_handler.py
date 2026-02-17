@@ -1,6 +1,5 @@
 import time
 import re
-from collections import deque
 from typing import Any, Dict, List, Optional, Tuple
 
 from maim_message import (
@@ -14,7 +13,7 @@ from maim_message import (
 
 from ..logger import logger
 from ..config import global_config
-from ..utils import to_base64, is_group_chat, pick_username
+from ..utils import SlidingWindowDeduper, to_base64, is_group_chat, pick_username
 from ..telegram_client import TelegramClient
 from .message_sending import message_send_instance
 
@@ -34,9 +33,12 @@ class TelegramUpdateHandler:
         self.tg = tg_client
         self.bot_id: Optional[int] = None
         self.bot_username: Optional[str] = None
-        self._recent_message_keys: deque[Tuple[int, int]] = deque()
-        self._recent_message_set: set[Tuple[int, int]] = set()
-        self._message_dedup_window = 4096
+        dedup_window = (
+            global_config.telegram_bot.message_dedup_window
+            if global_config.telegram_bot.message_dedup_window > 0
+            else global_config.telegram_bot.dedup_window
+        )
+        self._message_deduper = SlidingWindowDeduper[Tuple[int, int]](dedup_window)
 
     def set_self(self, bot_id: int, username: Optional[str]) -> None:
         self.bot_id = bot_id
@@ -44,16 +46,7 @@ class TelegramUpdateHandler:
 
     def _is_duplicate_message(self, chat_id: int, message_id: int) -> bool:
         # 同一 chat_id + message_id 视为同一条 Telegram 消息，避免重复投递到 MaiBot。
-        key = (chat_id, message_id)
-        if key in self._recent_message_set:
-            return True
-
-        self._recent_message_set.add(key)
-        self._recent_message_keys.append(key)
-        if len(self._recent_message_keys) > self._message_dedup_window:
-            old_key = self._recent_message_keys.popleft()
-            self._recent_message_set.discard(old_key)
-        return False
+        return self._message_deduper.seen_or_add((chat_id, message_id))
 
     async def check_allow_to_chat(self, user_id: int, chat_id: Optional[int], chat_type: str) -> bool:
         if is_group_chat(chat_type):
