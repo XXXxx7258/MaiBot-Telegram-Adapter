@@ -1,5 +1,6 @@
 import time
 import re
+from collections import deque
 from typing import Any, Dict, List, Optional, Tuple
 
 from maim_message import (
@@ -33,10 +34,26 @@ class TelegramUpdateHandler:
         self.tg = tg_client
         self.bot_id: Optional[int] = None
         self.bot_username: Optional[str] = None
+        self._recent_message_keys: deque[Tuple[int, int]] = deque()
+        self._recent_message_set: set[Tuple[int, int]] = set()
+        self._message_dedup_window = 4096
 
     def set_self(self, bot_id: int, username: Optional[str]) -> None:
         self.bot_id = bot_id
         self.bot_username = username
+
+    def _is_duplicate_message(self, chat_id: int, message_id: int) -> bool:
+        # 同一 chat_id + message_id 视为同一条 Telegram 消息，避免重复投递到 MaiBot。
+        key = (chat_id, message_id)
+        if key in self._recent_message_set:
+            return True
+
+        self._recent_message_set.add(key)
+        self._recent_message_keys.append(key)
+        if len(self._recent_message_keys) > self._message_dedup_window:
+            old_key = self._recent_message_keys.popleft()
+            self._recent_message_set.discard(old_key)
+        return False
 
     async def check_allow_to_chat(self, user_id: int, chat_id: Optional[int], chat_type: str) -> bool:
         if is_group_chat(chat_type):
@@ -82,6 +99,17 @@ class TelegramUpdateHandler:
             )
             return
 
+        message_id_raw = msg.get("message_id")
+        try:
+            message_id = int(message_id_raw)
+        except (TypeError, ValueError):
+            logger.debug(f"忽略缺少或非法 message_id 的消息: message_id={message_id_raw!r}, chat_id={chat_id}")
+            return
+
+        if self._is_duplicate_message(chat_id, message_id):
+            logger.debug(f"跳过重复消息: chat_id={chat_id}, message_id={message_id}")
+            return
+
         is_from_bot = self.bot_id is not None and user_id == self.bot_id
 
         if not await self.check_allow_to_chat(user_id, chat_id, chat_type):
@@ -120,7 +148,7 @@ class TelegramUpdateHandler:
         submit_seg = Seg(type="seglist", data=seg_list)
         message_info = BaseMessageInfo(
             platform=global_config.maibot_server.platform_name,
-            message_id=str(msg.get("message_id")),
+            message_id=str(message_id),
             time=message_time,
             user_info=user_info,
             group_info=group_info,

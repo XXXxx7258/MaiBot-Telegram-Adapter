@@ -1,5 +1,6 @@
 import asyncio
 import signal
+from collections import deque
 from typing import Optional
 
 from src.logger import logger
@@ -17,6 +18,9 @@ async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
     offset: Optional[int] = None
     timeout = global_config.telegram_bot.poll_timeout
     allowed = global_config.telegram_bot.allowed_updates
+    seen_update_ids: deque[int] = deque()
+    seen_update_set: set[int] = set()
+    dedup_window = 4096
     logger.info("启动 Telegram 轮询...")
     while True:
         try:
@@ -37,6 +41,20 @@ async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
                     logger.warning(f"忽略非法 update_id={uid_raw!r} 的 update: {upd}")
                     continue
 
+                # 先推进 offset，确保异常或重复场景不会导致同一 update 被持续回放。
+                next_offset = uid + 1
+                offset = next_offset if offset is None else max(offset, next_offset)
+
+                if uid in seen_update_set:
+                    logger.debug(f"跳过重复 update_id={uid}")
+                    continue
+
+                seen_update_set.add(uid)
+                seen_update_ids.append(uid)
+                if len(seen_update_ids) > dedup_window:
+                    old_uid = seen_update_ids.popleft()
+                    seen_update_set.discard(old_uid)
+
                 try:
                     await handler.handle_update(upd)
                 except asyncio.CancelledError:
@@ -44,10 +62,6 @@ async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
                 except Exception:
                     # 避免异常导致 offset 不推进而重复拉取同一 update（上游可能因此判定刷屏）
                     logger.exception(f"处理 update_id={uid} 时异常")
-
-                # Telegram 默认按 update_id 递增返回；这里保证 offset 单调推进，避免极端情况下回退导致重复拉取。
-                next_offset = uid + 1
-                offset = next_offset if offset is None else max(offset, next_offset)
         except asyncio.CancelledError:
             raise
         except Exception as e:
