@@ -57,16 +57,11 @@ class TelegramUpdateHandler:
                 logger.warning("群聊在聊天黑名单中，消息被丢弃")
                 return False
         else:
-            # Telegram 私聊场景：chat.id 是对端用户 ID；from.id 是实际发送者（可能为 bot 自己）。
-            # 访问控制应基于“对端用户”，因此优先使用 chat_id。
-            peer_user_id = chat_id if chat_id is not None else user_id
-            if (
-                global_config.chat.private_list_type == "whitelist"
-                and peer_user_id not in global_config.chat.private_list
-            ):
+            # 私聊 ACL 有意按发送者 user_id 过滤（与上游 main 当前行为保持一致）。
+            if global_config.chat.private_list_type == "whitelist" and user_id not in global_config.chat.private_list:
                 logger.warning("私聊不在聊天白名单中，消息被丢弃")
                 return False
-            if global_config.chat.private_list_type == "blacklist" and peer_user_id in global_config.chat.private_list:
+            if global_config.chat.private_list_type == "blacklist" and user_id in global_config.chat.private_list:
                 logger.warning("私聊在聊天黑名单中，消息被丢弃")
                 return False
         if user_id in global_config.chat.ban_user_id:
@@ -135,7 +130,7 @@ class TelegramUpdateHandler:
             logger.warning("处理后消息内容为空")
             return
         if is_from_bot:
-            # 不拦截 bot 自发消息；但打标供上游（如需要）区分，避免业务侧误触发循环。
+            # 到达此处说明消息已通过 ACL；这里仅为 bot 自发消息打标，供上游按需区分。
             additional_config["from_bot"] = True
 
         submit_seg = Seg(type="seglist", data=seg_list)
