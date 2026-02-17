@@ -88,10 +88,27 @@ class TelegramUpdateHandler:
         message_time = time.time()
         chat = msg.get("chat", {})
         from_user = msg.get("from", {})
-        chat_type = chat.get("type")
+        chat_type = chat.get("type") or ""
         chat_id = chat.get("id")
         user_id = from_user.get("id")
         message_id = msg.get("message_id")
+
+        if user_id is None or chat_id is None:
+            logger.debug(f"忽略缺少 user_id/chat_id 的消息: user_id={user_id}, chat_id={chat_id}, chat_type={chat_type}")
+            return
+
+        try:
+            user_id = int(user_id)
+            chat_id = int(chat_id)
+        except (TypeError, ValueError):
+            logger.debug(f"忽略非法 user_id/chat_id 的消息: user_id={user_id!r}, chat_id={chat_id!r}, chat_type={chat_type}")
+            return
+
+        try:
+            message_id = int(message_id)
+        except (TypeError, ValueError):
+            logger.debug(f"忽略缺少或非法 message_id 的消息: message_id={message_id!r}, chat_id={chat_id}")
+            return
 
         if self._is_duplicate_message(chat_id, message_id):
             logger.debug(f"跳过重复消息: chat_id={chat_id}, message_id={message_id}")
