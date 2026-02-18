@@ -13,6 +13,21 @@ from src.utils import SlidingWindowDeduper
 import src.send_handler.tg_sending as tg_sending
 
 
+def _positive_int(value: object, default: int) -> int:
+    try:
+        value_int = int(value)
+    except (TypeError, ValueError):
+        return default
+    return value_int if value_int > 0 else default
+
+
+def _normalize_allowed_updates(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return ["message"]
+    ret: list[str] = [str(item) for item in value if isinstance(item, str) and item]
+    return ret or ["message"]
+
+
 async def _bootstrap_poll_offset(
     tg: TelegramClient, allowed_updates: list[str], seen_update_deduper: SlidingWindowDeduper[int]
 ) -> Optional[int]:
@@ -81,11 +96,15 @@ async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
     tg = handler.tg
     offset: Optional[int] = None
     tg_cfg = global_config.telegram_bot
-    timeout = tg_cfg.poll_timeout
-    allowed = tg_cfg.allowed_updates
-    dedup_window = tg_cfg.update_dedup_window if tg_cfg.update_dedup_window > 0 else tg_cfg.dedup_window
+    timeout = _positive_int(getattr(tg_cfg, "poll_timeout", 20), 20)
+    allowed = _normalize_allowed_updates(getattr(tg_cfg, "allowed_updates", ["message"]))
+    shared_dedup_window = _positive_int(getattr(tg_cfg, "dedup_window", 4096), 4096)
+    update_dedup_window_raw = _positive_int(getattr(tg_cfg, "update_dedup_window", 0), 0)
+    dedup_window = update_dedup_window_raw if update_dedup_window_raw > 0 else shared_dedup_window
     seen_update_deduper = SlidingWindowDeduper[int](dedup_window)
-    logger.info("启动 Telegram 轮询...")
+    logger.info(
+        f"启动 Telegram 轮询... timeout={timeout}, allowed_updates={allowed}, update_dedup_window={dedup_window}"
+    )
     offset = await _bootstrap_poll_offset(tg, allowed, seen_update_deduper)
     while True:
         try:
@@ -165,6 +184,17 @@ async def main() -> None:
     # start MaiBot router and TG polling
     router_task = asyncio.create_task(mmc_start_com())
     poll_task = asyncio.create_task(telegram_poll_loop(handler))
+
+    def _log_bg_task_result(name: str, task: asyncio.Task) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception(f"{name} 任务异常退出")
+
+    router_task.add_done_callback(lambda t: _log_bg_task_result("MaiBot 通信", t))
+    poll_task.add_done_callback(lambda t: _log_bg_task_result("Telegram 轮询", t))
 
     # graceful shutdown on signals
     loop = asyncio.get_running_loop()
