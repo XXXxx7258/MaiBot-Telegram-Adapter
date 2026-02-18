@@ -58,13 +58,16 @@ class SendHandler:
             return
 
         sent_count = 0
-        for seg in payloads:
+        for seg_idx, seg in enumerate(payloads):
             try:
                 result: dict[str, Any] | None = None
                 if seg.type == "text":
                     text_data = self._normalize_text_data(seg.data)
                     if text_data is None:
-                        logger.warning(f"跳过空文本消息段: chat_id={normalized_chat_id}")
+                        logger.warning(
+                            "跳过空文本消息段: "
+                            f"chat_id={normalized_chat_id}, seg_index={seg_idx}, seg={seg!r}"
+                        )
                         continue
                     result = await tg_sending.tg_message_sender.send_text(normalized_chat_id, text_data, reply_to)
                     reply_to = None  # 仅第一条携带回复
@@ -93,17 +96,18 @@ class SendHandler:
             logger.warning(f"没有任何消息成功发送到 Telegram: chat_id={normalized_chat_id}")
 
     def _normalize_text_data(self, raw_text: Any) -> str | None:
-        if raw_text is None:
-            return None
-        if isinstance(raw_text, str):
-            return raw_text if raw_text.strip() else None
         if isinstance(raw_text, dict):
-            value = raw_text.get("text")
-            if isinstance(value, str):
-                return value if value.strip() else None
-            return None
-        text = str(raw_text)
-        return text if text.strip() else None
+            raw_text = raw_text.get("text")
+
+        if not isinstance(raw_text, str):
+            if raw_text is None:
+                return None
+            raw_text = str(raw_text)
+
+        if raw_text.strip():
+            return raw_text
+
+        return None
 
     def _normalize_chat_id(self, raw_chat_id: int | str | None) -> int | str | None:
         if raw_chat_id is None:
