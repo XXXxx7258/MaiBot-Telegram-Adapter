@@ -17,11 +17,15 @@ async def _bootstrap_poll_offset(
     tg: TelegramClient, allowed_updates: list[str], seen_update_deduper: SlidingWindowDeduper[int]
 ) -> Optional[int]:
     """启动时跳过积压更新，避免历史消息被当作新消息重放。"""
+    max_bootstrap_batches = 20
     offset: Optional[int] = None
     max_update_id: Optional[int] = None
     skipped = 0
+    batch_count = 0
 
-    while True:
+    logger.info("初始化 Telegram 轮询 offset...")
+
+    while batch_count < max_bootstrap_batches:
         try:
             resp = await tg.get_updates(offset=offset, timeout=0, allowed_updates=allowed_updates)
         except asyncio.CancelledError:
@@ -38,18 +42,33 @@ async def _bootstrap_poll_offset(
         if not updates:
             break
 
+        batch_count += 1
+        valid_uid_count = 0
         for upd in updates:
             uid_raw = upd.get("update_id")
             try:
                 uid = int(uid_raw)
             except (TypeError, ValueError):
                 continue
+            valid_uid_count += 1
             skipped += 1
             seen_update_deduper.seen_or_add(uid)
             max_update_id = uid if max_update_id is None else max(max_update_id, uid)
 
+        if valid_uid_count == 0:
+            logger.warning("初始化轮询时收到无有效 update_id 的批次，停止跳过积压")
+            break
+
         if max_update_id is not None:
             offset = max_update_id + 1
+            if batch_count % 5 == 0:
+                logger.info(f"跳过积压进行中: batches={batch_count}, skipped={skipped}, offset={offset}")
+
+    if batch_count >= max_bootstrap_batches:
+        logger.warning(
+            f"启动积压更新批次数超过上限({max_bootstrap_batches})，"
+            "停止继续清积压并开始正常轮询"
+        )
 
     if max_update_id is None:
         return None
@@ -66,8 +85,8 @@ async def telegram_poll_loop(handler: TelegramUpdateHandler) -> None:
     allowed = tg_cfg.allowed_updates
     dedup_window = tg_cfg.update_dedup_window if tg_cfg.update_dedup_window > 0 else tg_cfg.dedup_window
     seen_update_deduper = SlidingWindowDeduper[int](dedup_window)
-    offset = await _bootstrap_poll_offset(tg, allowed, seen_update_deduper)
     logger.info("启动 Telegram 轮询...")
+    offset = await _bootstrap_poll_offset(tg, allowed, seen_update_deduper)
     while True:
         try:
             resp = await tg.get_updates(offset=offset, timeout=timeout, allowed_updates=allowed)
