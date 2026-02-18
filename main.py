@@ -33,10 +33,12 @@ async def _bootstrap_poll_offset(
 ) -> Optional[int]:
     """启动时跳过积压更新，避免历史消息被当作新消息重放。"""
     max_bootstrap_batches = 20
+    max_consecutive_invalid_batches = 3
     offset: Optional[int] = None
     max_update_id: Optional[int] = None
     skipped = 0
     batch_count = 0
+    consecutive_invalid_batches = 0
 
     logger.info("初始化 Telegram 轮询 offset...")
 
@@ -71,8 +73,19 @@ async def _bootstrap_poll_offset(
             max_update_id = uid if max_update_id is None else max(max_update_id, uid)
 
         if valid_uid_count == 0:
-            logger.warning("初始化轮询时收到无有效 update_id 的批次，停止跳过积压")
-            break
+            consecutive_invalid_batches += 1
+            logger.warning(
+                "初始化轮询时收到无有效 update_id 的批次，"
+                f"consecutive_invalid_batches={consecutive_invalid_batches}"
+            )
+            if consecutive_invalid_batches >= max_consecutive_invalid_batches:
+                logger.warning(
+                    "初始化轮询连续收到无有效 update_id 的批次，"
+                    "停止继续清积压并开始正常轮询"
+                )
+                break
+            continue
+        consecutive_invalid_batches = 0
 
         if max_update_id is not None:
             offset = max_update_id + 1
