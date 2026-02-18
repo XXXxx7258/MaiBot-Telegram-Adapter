@@ -17,36 +17,43 @@ async def _bootstrap_poll_offset(
     tg: TelegramClient, allowed_updates: list[str], seen_update_deduper: SlidingWindowDeduper[int]
 ) -> Optional[int]:
     """启动时跳过积压更新，避免历史消息被当作新消息重放。"""
-    try:
-        resp = await tg.get_updates(offset=None, timeout=0, allowed_updates=allowed_updates)
-    except Exception:
-        logger.exception("初始化轮询 offset 失败，将从默认 offset 开始轮询")
-        return None
-
-    if not resp.get("ok"):
-        logger.warning(f"初始化轮询 offset 失败（getUpdates 返回异常）: {resp}")
-        return None
-
-    updates = resp.get("result") or []
-    if not updates:
-        return None
-
+    offset: Optional[int] = None
     max_update_id: Optional[int] = None
     skipped = 0
-    for upd in updates:
-        uid_raw = upd.get("update_id")
+
+    while True:
         try:
-            uid = int(uid_raw)
-        except (TypeError, ValueError):
-            continue
-        skipped += 1
-        seen_update_deduper.seen_or_add(uid)
-        max_update_id = uid if max_update_id is None else max(max_update_id, uid)
+            resp = await tg.get_updates(offset=offset, timeout=0, allowed_updates=allowed_updates)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("初始化轮询 offset 失败，将从默认 offset 开始轮询")
+            return None
+
+        if not resp.get("ok"):
+            logger.warning(f"初始化轮询 offset 失败（getUpdates 返回异常）: {resp}")
+            return None
+
+        updates = resp.get("result") or []
+        if not updates:
+            break
+
+        for upd in updates:
+            uid_raw = upd.get("update_id")
+            try:
+                uid = int(uid_raw)
+            except (TypeError, ValueError):
+                continue
+            skipped += 1
+            seen_update_deduper.seen_or_add(uid)
+            max_update_id = uid if max_update_id is None else max(max_update_id, uid)
+
+        if max_update_id is not None:
+            offset = max_update_id + 1
 
     if max_update_id is None:
         return None
 
-    offset = max_update_id + 1
     logger.info(f"启动时检测到 {skipped} 条积压更新，已跳过到 offset={offset}")
     return offset
 
