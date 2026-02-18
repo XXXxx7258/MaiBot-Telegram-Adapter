@@ -62,7 +62,11 @@ class SendHandler:
             try:
                 result: dict[str, Any] | None = None
                 if seg.type == "text":
-                    result = await tg_sending.tg_message_sender.send_text(normalized_chat_id, seg.data, reply_to)
+                    text_data = self._normalize_text_data(seg.data)
+                    if text_data is None:
+                        logger.warning(f"跳过空文本消息段: chat_id={normalized_chat_id}")
+                        continue
+                    result = await tg_sending.tg_message_sender.send_text(normalized_chat_id, text_data, reply_to)
                     reply_to = None  # 仅第一条携带回复
                 elif seg.type == "image":
                     result = await tg_sending.tg_message_sender.send_image_base64(normalized_chat_id, seg.data)
@@ -87,6 +91,19 @@ class SendHandler:
 
         if sent_count == 0:
             logger.warning(f"没有任何消息成功发送到 Telegram: chat_id={normalized_chat_id}")
+
+    def _normalize_text_data(self, raw_text: Any) -> str | None:
+        if raw_text is None:
+            return None
+        if isinstance(raw_text, str):
+            return raw_text if raw_text.strip() else None
+        if isinstance(raw_text, dict):
+            value = raw_text.get("text")
+            if isinstance(value, str):
+                return value if value.strip() else None
+            return None
+        text = str(raw_text)
+        return text if text.strip() else None
 
     def _normalize_chat_id(self, raw_chat_id: int | str | None) -> int | str | None:
         if raw_chat_id is None:
