@@ -97,6 +97,8 @@ class SendHandler:
 
     def _normalize_text_data(self, raw_text: Any) -> str | None:
         if isinstance(raw_text, dict):
+            if "text" not in raw_text:
+                logger.debug(f"文本段字典缺少 text 字段，已跳过: keys={list(raw_text.keys())}")
             raw_text = raw_text.get("text")
 
         if not isinstance(raw_text, str):
