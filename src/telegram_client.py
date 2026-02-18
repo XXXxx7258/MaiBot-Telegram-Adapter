@@ -142,9 +142,15 @@ class TelegramClient:
     async def _read_json_dict(self, resp: aiohttp.ClientResponse) -> Dict[str, Any]:
         try:
             data = await resp.json(content_type=None)
-        except Exception:
+        except Exception as e:
             raw_text = await resp.text()
-            return {"ok": False, "description": "invalid json response", "status_code": resp.status, "raw": raw_text}
+            return {
+                "ok": False,
+                "description": "invalid json response",
+                "status_code": resp.status,
+                "raw": raw_text,
+                "error": f"{type(e).__name__}: {e}",
+            }
         if isinstance(data, dict):
             return data
         return {"ok": False, "description": "non-dict json response", "status_code": resp.status, "raw": data}
